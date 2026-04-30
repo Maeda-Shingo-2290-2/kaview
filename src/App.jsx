@@ -31,6 +31,19 @@ function createDefaultFilters() {
   };
 }
 
+function createCurrentMonthRange() {
+  const today = new Date();
+  const start = new Date(today.getFullYear(), today.getMonth(), 1);
+  const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+  return {
+    year: today.getFullYear(),
+    monthIndex: today.getMonth(),
+    monthLabel: `${today.getFullYear()}年${today.getMonth() + 1}月`,
+    from: toDateInputValue(start),
+    to: toDateInputValue(end),
+  };
+}
+
 function formatYen(value) {
   if (value === null || value === undefined) return "--";
   return yen.format(Math.round(value));
@@ -95,37 +108,69 @@ function MetricCard({ label, value, tone }) {
   );
 }
 
-function EmptyChart() {
-  return <div className="muted chart-empty">データがありません</div>;
+function EmptyChart({ message = "データがありません" }) {
+  return <div className="muted chart-empty">{message}</div>;
 }
 
-function LineChart({ items }) {
+function CombinedChart({ items }) {
   if (!items.length) return <EmptyChart />;
   const width = 900;
   const height = 300;
   const pad = { top: 18, right: 20, bottom: 36, left: 78 };
   const plotW = width - pad.left - pad.right;
   const plotH = height - pad.top - pad.bottom;
-  const values = items.map((item) => item.cumulative_realized_pl_yen);
-  const bounds = chartBounds(values);
+  const periodValues = items.map((item) => item.realized_pl_yen);
+  const cumulativeValues = items.map((item) => item.cumulative_realized_pl_yen);
+  const periodBounds = chartBounds(periodValues);
+  const cumulativeBounds = chartBounds(cumulativeValues);
   const x = (index) =>
     pad.left + (items.length === 1 ? plotW / 2 : (index / (items.length - 1)) * plotW);
-  const y = (value) => pad.top + ((bounds.max - value) / (bounds.max - bounds.min)) * plotH;
-  const points = items.map((item, index) => `${x(index)},${y(item.cumulative_realized_pl_yen)}`).join(" ");
-  const ticks = [bounds.max, (bounds.max + bounds.min) / 2, bounds.min];
+  const yBar = (value) => pad.top + ((periodBounds.max - value) / (periodBounds.max - periodBounds.min)) * plotH;
+  const yLine = (value) =>
+    pad.top + ((cumulativeBounds.max - value) / (cumulativeBounds.max - cumulativeBounds.min)) * plotH;
+  const zeroY = yBar(0);
+  const barW = Math.max(2, plotW / items.length - 2);
+  const points = items.map((item, index) => `${x(index)},${yLine(item.cumulative_realized_pl_yen)}`).join(" ");
+  const leftTicks = [periodBounds.max, (periodBounds.max + periodBounds.min) / 2, periodBounds.min];
+  const rightTicks = [cumulativeBounds.max, (cumulativeBounds.max + cumulativeBounds.min) / 2, cumulativeBounds.min];
   const step = Math.max(1, Math.ceil(items.length / 6));
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="累積実現損益チャート">
-      {ticks.map((tick) => (
-        <g key={tick}>
-          <line className="grid-line" x1={pad.left} x2={width - pad.right} y1={y(tick)} y2={y(tick)} />
-          <text className="chart-label" x="8" y={y(tick) + 4}>
+    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="実現損益推移チャート">
+      {leftTicks.map((tick) => (
+        <g key={`left-${tick}`}>
+          <line className="grid-line" x1={pad.left} x2={width - pad.right} y1={yBar(tick)} y2={yBar(tick)} />
+          <text className="chart-label" x="8" y={yBar(tick) + 4}>
             {formatCompact(tick)}
           </text>
         </g>
       ))}
-      <line className="axis" x1={pad.left} x2={width - pad.right} y1={y(0)} y2={y(0)} />
+      {rightTicks.map((tick) => (
+        <text key={`right-${tick}`} className="chart-label" x={width - pad.right + 6} y={yLine(tick) + 4}>
+          {formatCompact(tick)}
+        </text>
+      ))}
+      <line className="axis" x1={pad.left} x2={width - pad.right} y1={zeroY} y2={zeroY} />
+      {items.map((item, index) => {
+        const barX = pad.left + index * (plotW / items.length);
+        const valueY = yBar(item.realized_pl_yen);
+        const barY = Math.min(valueY, zeroY);
+        const barH = Math.max(1, Math.abs(zeroY - valueY));
+        return (
+          <rect
+            key={`${item.period}-${index}`}
+            className={item.realized_pl_yen >= 0 ? "bar-profit" : "bar-loss"}
+            x={barX}
+            y={barY}
+            width={barW}
+            height={barH}
+          >
+            <title>
+              {item.period}: {formatYen(item.realized_pl_yen)} / 累積 {formatYen(item.cumulative_realized_pl_yen)}
+            </title>
+          </rect>
+        );
+      })}
       <polyline className="line-profit" points={points} />
       {items.map((item, index) => {
         if (index % step !== 0 && index !== items.length - 1) return null;
@@ -145,68 +190,57 @@ function LineChart({ items }) {
   );
 }
 
-function BarChart({ items }) {
-  if (!items.length) return <EmptyChart />;
-  const width = 900;
-  const height = 300;
-  const pad = { top: 18, right: 20, bottom: 36, left: 78 };
-  const plotW = width - pad.left - pad.right;
-  const plotH = height - pad.top - pad.bottom;
-  const values = items.map((item) => item.realized_pl_yen);
-  const bounds = chartBounds(values);
-  const y = (value) => pad.top + ((bounds.max - value) / (bounds.max - bounds.min)) * plotH;
-  const zeroY = y(0);
-  const barW = Math.max(2, plotW / items.length - 2);
-  const ticks = [bounds.max, (bounds.max + bounds.min) / 2, bounds.min];
-  const step = Math.max(1, Math.ceil(items.length / 6));
+function MonthCalendar({ monthRange, items }) {
+  const firstDay = new Date(monthRange.year, monthRange.monthIndex, 1);
+  const lastDay = new Date(monthRange.year, monthRange.monthIndex + 1, 0);
+  const startWeekday = firstDay.getDay();
+  const daysInMonth = lastDay.getDate();
+  const itemMap = new Map(items.map((item) => [item.period, item]));
+  const cells = [];
+
+  for (let index = 0; index < startWeekday; index += 1) {
+    cells.push({ kind: "blank", key: `blank-${index}` });
+  }
+
+  for (let day = 1; day <= daysInMonth; day += 1) {
+    const date = toDateInputValue(new Date(monthRange.year, monthRange.monthIndex, day));
+    const item = itemMap.get(date);
+    cells.push({
+      kind: "day",
+      key: date,
+      day,
+      realizedPl: item?.realized_pl_yen ?? null,
+      tradeCount: item?.trade_count ?? 0,
+    });
+  }
+
+  while (cells.length % 7 !== 0) {
+    cells.push({ kind: "blank", key: `tail-${cells.length}` });
+  }
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="期間別実現損益チャート">
-      {ticks.map((tick) => (
-        <g key={tick}>
-          <line className="grid-line" x1={pad.left} x2={width - pad.right} y1={y(tick)} y2={y(tick)} />
-          <text className="chart-label" x="8" y={y(tick) + 4}>
-            {formatCompact(tick)}
-          </text>
-        </g>
-      ))}
-      <line className="axis" x1={pad.left} x2={width - pad.right} y1={zeroY} y2={zeroY} />
-      {items.map((item, index) => {
-        const barX = pad.left + index * (plotW / items.length);
-        const valueY = y(item.realized_pl_yen);
-        const barY = Math.min(valueY, zeroY);
-        const barH = Math.max(1, Math.abs(zeroY - valueY));
-        return (
-          <rect
-            key={`${item.period}-${index}`}
-            className={item.realized_pl_yen >= 0 ? "bar-profit" : "bar-loss"}
-            x={barX}
-            y={barY}
-            width={barW}
-            height={barH}
-          >
-            <title>
-              {item.period}: {formatYen(item.realized_pl_yen)}
-            </title>
-          </rect>
-        );
-      })}
-      {items.map((item, index) => {
-        if (index % step !== 0 && index !== items.length - 1) return null;
-        const x = pad.left + index * (plotW / Math.max(items.length - 1, 1));
-        return (
-          <text
-            key={item.period}
-            className="chart-label"
-            x={x}
-            y={height - pad.bottom + 24}
-            textAnchor="middle"
-          >
-            {item.period}
-          </text>
-        );
-      })}
-    </svg>
+    <div className="calendar">
+      <div className="calendar-weekdays">
+        {["日", "月", "火", "水", "木", "金", "土"].map((label) => (
+          <div key={label} className="calendar-weekday">
+            {label}
+          </div>
+        ))}
+      </div>
+      <div className="calendar-grid">
+        {cells.map((cell) =>
+          cell.kind === "blank" ? (
+            <div key={cell.key} className="calendar-cell blank" />
+          ) : (
+            <div key={cell.key} className={`calendar-cell ${plClass(cell.realizedPl)}`}>
+              <div className="calendar-day">{cell.day}</div>
+              <div className="calendar-value">{cell.realizedPl === null ? "--" : formatYen(cell.realizedPl)}</div>
+              <div className="calendar-count">{cell.tradeCount ? `${cell.tradeCount}件` : ""}</div>
+            </div>
+          ),
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -230,6 +264,7 @@ function SecurityRanking({ items }) {
 
 export default function App() {
   const defaultFilters = useMemo(() => createDefaultFilters(), []);
+  const currentMonthRange = useMemo(() => createCurrentMonthRange(), []);
   const fileInputRef = useRef(null);
   const [filtersMeta, setFiltersMeta] = useState(null);
   const [draftFilters, setDraftFilters] = useState(defaultFilters);
@@ -247,6 +282,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [summary, setSummary] = useState(null);
   const [timeseries, setTimeseries] = useState([]);
+  const [calendarSeries, setCalendarSeries] = useState([]);
   const [securityTable, setSecurityTable] = useState({ items: [], total: 0 });
   const [topSecurities, setTopSecurities] = useState([]);
   const [worstSecurities, setWorstSecurities] = useState([]);
@@ -261,11 +297,23 @@ export default function App() {
   }, [refreshNonce]);
 
   useEffect(() => {
+    const calendarFilters = {
+      q: filters.q,
+      account: filters.account,
+      margin_type: filters.margin_type,
+      transaction_type: filters.transaction_type,
+      pl_type: filters.pl_type,
+      from: currentMonthRange.from,
+      to: currentMonthRange.to,
+      group_by: "day",
+    };
+
     setLoading(true);
     setError("");
     Promise.all([
       fetchJson(apiUrl("/api/summary", filters)),
       fetchJson(apiUrl("/api/pl/timeseries", { ...filters, group_by: groupBy })),
+      fetchJson(apiUrl("/api/pl/timeseries", calendarFilters)),
       fetchJson(apiUrl("/api/pl/by-security", {
         ...filters,
         sort: "total_realized_pl_yen",
@@ -291,9 +339,10 @@ export default function App() {
         limit: 100,
       })),
     ])
-      .then(([summaryData, timeseriesData, securityData, topData, worstData, tradeData]) => {
+      .then(([summaryData, timeseriesData, calendarData, securityData, topData, worstData, tradeData]) => {
         setSummary(summaryData);
         setTimeseries(timeseriesData.items);
+        setCalendarSeries(calendarData.items);
         setSecurityTable(securityData);
         setTopSecurities(topData.items);
         setWorstSecurities(worstData.items);
@@ -301,7 +350,7 @@ export default function App() {
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [filters, groupBy, refreshNonce]);
+  }, [filters, groupBy, refreshNonce, currentMonthRange.from, currentMonthRange.to]);
 
   const metrics = useMemo(() => {
     if (!summary) return [];
@@ -558,10 +607,10 @@ export default function App() {
           ))}
         </section>
 
-        <section className="grid two-columns">
+        <section className="grid dashboard-grid">
           <article className="panel">
             <div className="panel-heading">
-              <h2>累積実現損益</h2>
+              <h2>実現損益推移</h2>
               <div className="segmented" role="group" aria-label="期間">
                 <button
                   type="button"
@@ -579,14 +628,16 @@ export default function App() {
                 </button>
               </div>
             </div>
-            <div className="chart">{loading ? <div className="muted chart-empty">読み込み中...</div> : <LineChart items={timeseries} />}</div>
+            <div className="chart chart-large">
+              {loading ? <EmptyChart message="読み込み中..." /> : <CombinedChart items={timeseries} />}
+            </div>
           </article>
 
-          <article className="panel">
+          <article className="panel calendar-panel">
             <div className="panel-heading">
-              <h2>期間別実現損益</h2>
+              <h2>{currentMonthRange.monthLabel} カレンダー</h2>
             </div>
-            <div className="chart">{loading ? <div className="muted chart-empty">読み込み中...</div> : <BarChart items={timeseries} />}</div>
+            {loading ? <EmptyChart message="読み込み中..." /> : <MonthCalendar monthRange={currentMonthRange} items={calendarSeries} />}
           </article>
         </section>
 
