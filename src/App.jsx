@@ -31,17 +31,26 @@ function createDefaultFilters() {
   };
 }
 
-function createCurrentMonthRange() {
-  const today = new Date();
-  const start = new Date(today.getFullYear(), today.getMonth(), 1);
-  const end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+function createMonthRange(date) {
+  const year = date.getFullYear();
+  const monthIndex = date.getMonth();
+  const start = new Date(year, monthIndex, 1);
+  const end = new Date(year, monthIndex + 1, 0);
   return {
-    year: today.getFullYear(),
-    monthIndex: today.getMonth(),
-    monthLabel: `${today.getFullYear()}年${today.getMonth() + 1}月`,
+    year,
+    monthIndex,
+    monthLabel: `${year}年${monthIndex + 1}月`,
     from: toDateInputValue(start),
     to: toDateInputValue(end),
   };
+}
+
+function createCurrentMonthRange() {
+  return createMonthRange(new Date());
+}
+
+function shiftMonthRange(monthRange, amount) {
+  return createMonthRange(new Date(monthRange.year, monthRange.monthIndex + amount, 1));
 }
 
 function formatYen(value) {
@@ -264,11 +273,11 @@ function SecurityRanking({ items }) {
 
 export default function App() {
   const defaultFilters = useMemo(() => createDefaultFilters(), []);
-  const currentMonthRange = useMemo(() => createCurrentMonthRange(), []);
   const fileInputRef = useRef(null);
   const [filtersMeta, setFiltersMeta] = useState(null);
   const [draftFilters, setDraftFilters] = useState(defaultFilters);
   const [filters, setFilters] = useState(defaultFilters);
+  const [calendarMonthRange, setCalendarMonthRange] = useState(() => createCurrentMonthRange());
   const [groupBy, setGroupBy] = useState("day");
   const [refreshNonce, setRefreshNonce] = useState(0);
   const [isDragActive, setIsDragActive] = useState(false);
@@ -303,8 +312,8 @@ export default function App() {
       margin_type: filters.margin_type,
       transaction_type: filters.transaction_type,
       pl_type: filters.pl_type,
-      from: currentMonthRange.from,
-      to: currentMonthRange.to,
+      from: calendarMonthRange.from,
+      to: calendarMonthRange.to,
       group_by: "day",
     };
 
@@ -350,7 +359,7 @@ export default function App() {
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [filters, groupBy, refreshNonce, currentMonthRange.from, currentMonthRange.to]);
+  }, [filters, groupBy, refreshNonce, calendarMonthRange.from, calendarMonthRange.to]);
 
   const metrics = useMemo(() => {
     if (!summary) return [];
@@ -378,6 +387,14 @@ export default function App() {
   const resetFilters = () => {
     setDraftFilters(defaultFilters);
     setFilters(defaultFilters);
+  };
+
+  const moveCalendarMonth = (amount) => {
+    setCalendarMonthRange((current) => shiftMonthRange(current, amount));
+  };
+
+  const resetCalendarMonth = () => {
+    setCalendarMonthRange(createCurrentMonthRange());
   };
 
   const handleImport = async (file) => {
@@ -635,9 +652,20 @@ export default function App() {
 
           <article className="panel calendar-panel">
             <div className="panel-heading">
-              <h2>{currentMonthRange.monthLabel} カレンダー</h2>
+              <h2>{calendarMonthRange.monthLabel} カレンダー</h2>
+              <div className="calendar-nav" role="group" aria-label="カレンダー月移動">
+                <button type="button" className="secondary" onClick={() => moveCalendarMonth(-1)}>
+                  前月
+                </button>
+                <button type="button" className="secondary" onClick={resetCalendarMonth}>
+                  今月
+                </button>
+                <button type="button" className="secondary" onClick={() => moveCalendarMonth(1)}>
+                  次月
+                </button>
+              </div>
             </div>
-            {loading ? <EmptyChart message="読み込み中..." /> : <MonthCalendar monthRange={currentMonthRange} items={calendarSeries} />}
+            {loading ? <EmptyChart message="読み込み中..." /> : <MonthCalendar monthRange={calendarMonthRange} items={calendarSeries} />}
           </article>
         </section>
 

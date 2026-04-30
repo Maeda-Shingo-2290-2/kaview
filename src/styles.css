@@ -328,6 +328,18 @@ h2 {
   flex-direction: column;
 }
 
+.calendar-nav {
+  display: inline-flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.calendar-nav button {
+  min-height: 30px;
+  padding: 0 10px;
+}
+
 .calendar {
   display: grid;
   gap: 10px;
